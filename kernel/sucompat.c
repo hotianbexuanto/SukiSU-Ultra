@@ -409,6 +409,10 @@ int __ksu_handle_devpts(struct inode *inode)
     return 0;
 }
 
+// Export ksu_handle_devpts for devpts filesystem hook
+int ksu_handle_devpts(struct inode *inode) __attribute__((alias("__ksu_handle_devpts")));
+EXPORT_SYMBOL(ksu_handle_devpts);
+
 #ifdef KSU_HAVE_SYSCALL_TRACEPOINTS_HOOK
 
 // Tracepoint probe for sys_enter

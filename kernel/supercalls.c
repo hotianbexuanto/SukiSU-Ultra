@@ -382,8 +382,11 @@ static int do_get_wrapper_fd(void __user *arg) {
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 #define getfd_secure anon_inode_create_getfd
-#else
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 #define getfd_secure anon_inode_getfd_secure
+#else
+// For kernels < 5.10, use anon_inode_getfd (without security context)
+#define getfd_secure(name, fops, priv, flags, ctx) anon_inode_getfd(name, fops, priv, flags)
 #endif
     ret = getfd_secure("[ksu_fdwrapper]", &data->ops, data, f->f_flags, NULL);
     if (ret < 0) {
@@ -393,7 +396,12 @@ static int do_get_wrapper_fd(void __user *arg) {
     struct file* pf = fget(ret);
 
     struct inode* wrapper_inode = file_inode(pf);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0) || defined(KSU_OPTIONAL_SELINUX_INODE)
     struct inode_security_struct *sec = selinux_inode(wrapper_inode);
+#else
+    struct inode_security_struct *sec =
+        (struct inode_security_struct *)wrapper_inode->i_security;
+#endif
     if (sec) {
         sec->sid = ksu_file_sid;
     }

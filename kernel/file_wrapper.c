@@ -276,7 +276,7 @@ static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in,
 static int ksu_wrapper_clone_file_range(struct file *file_in, loff_t pos_in,
 				struct file *file_out, loff_t pos_out, u64 len) {
 	// TODO: determine which file to use
-	struct ksu_file_proxy* data = file_in->private_data;
+	struct ksu_file_wrapper* data = file_in->private_data;
 	struct file* orig = data->orig;
 	if (orig->f_op->clone_file_range) {
 		return orig->f_op->clone_file_range(orig, pos_in, file_out, pos_out, len);
@@ -287,7 +287,7 @@ static int ksu_wrapper_clone_file_range(struct file *file_in, loff_t pos_in,
 static ssize_t ksu_wrapper_dedupe_file_range(struct file *src_file, u64 loff,
 				u64 len, struct file *dst_file, u64 dst_loff) {
 	// TODO: determine which file to use
-	struct ksu_file_proxy* data = src_file->private_data;
+	struct ksu_file_wrapper* data = src_file->private_data;
 	struct file* orig = data->orig;
 	if (orig->f_op->dedupe_file_range) {
 		return orig->f_op->dedupe_file_range(orig, loff, len, dst_file, dst_loff);
@@ -296,12 +296,23 @@ static ssize_t ksu_wrapper_dedupe_file_range(struct file *src_file, u64 loff,
 }
 #endif
 
+// Wrapper for fadvise - provides file access pattern advice to the kernel
 static int ksu_wrapper_fadvise(struct file *fp, loff_t off1, loff_t off2, int flags) {
 	struct ksu_file_wrapper* data = fp->private_data;
 	struct file* orig = data->orig;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
+	// In Linux 4.19+, fadvise is part of file_operations
 	if (orig->f_op->fadvise) {
 		return orig->f_op->fadvise(orig, off1, off2, flags);
 	}
+#else
+	// In older kernels (< 4.19), fadvise is not part of file_operations.
+	// The advice is handled through direct syscall path instead of VFS layer.
+	// We return success (0) as the advice is optional and won't cause errors.
+	// The actual fadvise syscall will work independently of this wrapper.
+	(void)orig; (void)off1; (void)off2; (void)flags;
+	return 0;
+#endif
 	return -EINVAL;
 }
 
@@ -358,13 +369,16 @@ struct ksu_file_wrapper* ksu_create_file_wrapper(struct file* fp) {
 	p->ops.setlease = fp->f_op->setlease ? ksu_wrapper_setlease : NULL;
 	p->ops.fallocate = fp->f_op->fallocate ? ksu_wrapper_fallocate : NULL;
 	p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
-	p->ops.copy_file_range = fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
+	p->ops.copy_file_range = fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
 	p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
+	// fadvise is part of file_operations in Linux 4.19+
 	p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;
 #else
 	p->ops.clone_file_range = fp->f_op->clone_file_range ? ksu_wrapper_clone_file_range : NULL;
 	p->ops.dedupe_file_range = fp->f_op->dedupe_file_range ? ksu_wrapper_dedupe_file_range : NULL;
+	// Note: fadvise is not part of file_operations in kernels < 4.19
+	// It's handled through direct syscall path, so no wrapper needed here
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)

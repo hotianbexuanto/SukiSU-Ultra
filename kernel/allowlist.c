@@ -7,9 +7,13 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/printk.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+#include <linux/sched/task.h>
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 #include <linux/compiler_types.h>
 #endif
@@ -419,7 +423,11 @@ void persistent_allow_list()
         goto put_task;
     }
     cb->func = do_persistent_allow_list;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
     task_work_add(tsk, cb, TWA_RESUME);
+#else
+    task_work_add(tsk, cb, true);
+#endif
 
 put_task:
     put_task_struct(tsk);
